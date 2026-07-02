@@ -283,8 +283,8 @@ def tiered_streak_reward(career: List[Dict]) -> float:
 # PHASE 1: HARD DROPS
 # ---------------------------------------------------------------------------
 def hard_drop(c: Dict, now: datetime) -> bool:
-    profile = c["profile"]
-    signals = c["redrob_signals"]
+    profile = c.get("profile", {}) or {}
+    signals = c.get("redrob_signals", {}) or {}
     career = c.get("career_history", [])
 
     # 1. Not in India
@@ -329,7 +329,7 @@ def hard_drop(c: Dict, now: datetime) -> bool:
 # ---------------------------------------------------------------------------
 def is_honeypot(c: Dict) -> bool:
     # flag profiles with 2+ impossible skill signals
-    profile = c["profile"]
+    profile = c.get("profile", {}) or {}
     skills = c.get("skills", [])
     yoe = profile.get("years_of_experience", 0)
     red_flags = 0
@@ -362,15 +362,15 @@ def is_honeypot(c: Dict) -> bool:
 # ---------------------------------------------------------------------------
 def penalty_multiplier(c: Dict, now: datetime) -> float:
     mul = 1.0
-    profile = c["profile"]
+    profile = c.get("profile", {}) or {}
     skills = c.get("skills", [])
     career = c.get("career_history", [])
-    signals = c["redrob_signals"]
+    signals = c.get("redrob_signals", {}) or {}
     yoe = profile.get("years_of_experience", 0)
     all_descs = " ".join(job.get("description", "").lower() for job in career)
 
     nlp_ir_months = sum(
-        clipped_skill_months(s, yoe) for s in skills if s["name"].lower() in NLP_IR_SKILLS
+        clipped_skill_months(s, yoe) for s in skills if s.get("name", "").lower() in NLP_IR_SKILLS
     )
 
     # 0. Duration inflation: skills claiming more months than the whole
@@ -383,12 +383,12 @@ def penalty_multiplier(c: Dict, now: datetime) -> float:
 
     # 1. Shallow LLM-only (×0.1)
     has_hype = any(
-        s["name"].lower() in ("langchain", "openai", "llamaindex", "prompt engineering")
+        s.get("name", "").lower() in ("langchain", "openai", "llamaindex", "prompt engineering")
         and s.get("duration_months", 0) <= 12
         for s in skills
     )
     has_deep = any(
-        s["name"].lower() in NLP_IR_SKILLS and clipped_skill_months(s, yoe) > 24
+        s.get("name", "").lower() in NLP_IR_SKILLS and clipped_skill_months(s, yoe) > 24
         for s in skills
     )
     has_pre_llm_work = any(
@@ -402,7 +402,7 @@ def penalty_multiplier(c: Dict, now: datetime) -> float:
     # 1b. Framework dominance (×0.3)
     langchain_months = sum(
         clipped_skill_months(s, yoe) for s in skills
-        if s["name"].lower() in ("langchain", "llamaindex", "openai")
+        if s.get("name", "").lower() in ("langchain", "llamaindex", "openai")
     )
     if langchain_months > 24 and langchain_months > (nlp_ir_months * 0.5) and not has_deep:
         mul *= 0.3
@@ -424,14 +424,14 @@ def penalty_multiplier(c: Dict, now: datetime) -> float:
 
     # 4. CV/Speech primary without meaningful NLP/IR depth (×0.3)
     cv_months = sum(
-        clipped_skill_months(s, yoe) for s in skills if s["name"].lower() in CV_SKILLS
+        clipped_skill_months(s, yoe) for s in skills if s.get("name", "").lower() in CV_SKILLS
     )
     if cv_months > 0 and cv_months > nlp_ir_months and nlp_ir_months < 24:
         mul *= 0.3
 
     # 5. Prompt Engineering dominance (×0.2)
     top_3 = [
-        s["name"].lower()
+        s.get("name", "").lower()
         for s in sorted(skills, key=lambda x: clipped_skill_months(x, yoe), reverse=True)[:3]
     ]
     if "prompt engineering" in top_3 and nlp_ir_months < 48:
@@ -510,7 +510,7 @@ def penalty_multiplier(c: Dict, now: datetime) -> float:
 # ---------------------------------------------------------------------------
 def build_candidate_text(c: Dict) -> str:
     """Free-text representation of a candidate for TF-IDF similarity against the JD."""
-    profile = c["profile"]
+    profile = c.get("profile", {}) or {}
     parts = [
         profile.get("headline", ""),
         profile.get("summary", ""),
@@ -530,10 +530,10 @@ def compute_boost_score(c: Dict, qualifying_months: int, jd_sim_percentile: floa
     # TF-IDF similarity as a percentile rank across survivors (0..1) so raw
     # cosine magnitudes (typically 0.05-0.3) don't get drowned out
     score += jd_sim_percentile * 4.0
-    profile = c["profile"]
+    profile = c.get("profile", {}) or {}
     skills = c.get("skills", [])
     career = c.get("career_history", [])
-    signals = c["redrob_signals"]
+    signals = c.get("redrob_signals", {}) or {}
     yoe = profile.get("years_of_experience", 0)
     all_descs = " ".join(job.get("description", "").lower() for job in career)
 
@@ -594,7 +594,7 @@ def compute_boost_score(c: Dict, qualifying_months: int, jd_sim_percentile: floa
     score += min(kw_count, 5.0)
 
     # Niche valuable skills
-    skill_names = {s["name"].lower() for s in skills}
+    skill_names = {s.get("name", "").lower() for s in skills}
     if any(k in skill_names for k in ("lora", "qlora", "peft")):
         score += 2.0
     if any(k in skill_names for k in ("xgboost", "lightgbm", "learning to rank")):
@@ -609,7 +609,7 @@ def compute_boost_score(c: Dict, qualifying_months: int, jd_sim_percentile: floa
 
     # Python proficiency
     for s in skills:
-        if s["name"].lower() == "python":
+        if s.get("name", "").lower() == "python":
             if s.get("proficiency") in ("advanced", "expert"):
                 score += 2.0
             elif s.get("proficiency") == "intermediate":
@@ -668,7 +668,7 @@ def compute_boost_score(c: Dict, qualifying_months: int, jd_sim_percentile: floa
 
     # NLP/IR depth boost (trust-clipped so inflated durations don't count)
     nlp_ir_total = sum(
-        clipped_skill_months(s, yoe) for s in skills if s["name"].lower() in NLP_IR_SKILLS
+        clipped_skill_months(s, yoe) for s in skills if s.get("name", "").lower() in NLP_IR_SKILLS
     )
     if nlp_ir_total >= 72:
         score += 3.0
@@ -749,14 +749,19 @@ def article(word: str) -> str:
     return "an" if word[:1].lower() in "aeiou" else "a"
 
 
+def pretty_term(term: str) -> str:
+    """Return a display-friendly version of a tech term using known lookup tables."""
+    return METRIC_PRETTY.get(term, DB_PRETTY.get(term, term.title()))
+
+
 def generate_reasoning(c: Optional[Dict], rank: int, cid: str = "") -> str:
     if c is None:  # backfilled row (only occurs when <100 candidates survive)
         return ("Below-bar profile included to complete the shortlist of 100; "
                 "does not meet the core retrieval/product-experience requirements.")
 
-    profile = c["profile"]
+    profile = c.get("profile", {}) or {}
     career = c.get("career_history", [])
-    signals = c["redrob_signals"]
+    signals = c.get("redrob_signals", {}) or {}
     skills = c.get("skills", [])
 
     yoe = profile.get("years_of_experience", 0)
@@ -766,17 +771,31 @@ def generate_reasoning(c: Optional[Dict], rank: int, cid: str = "") -> str:
     qual = compute_qualifying_months(c)
 
     all_descs = " ".join(job.get("description", "").lower() for job in career)
-    skill_names_text = " ".join(s["name"].lower() for s in skills)
+    skill_names_text = " ".join(s.get("name", "").lower() for s in skills)
     all_text = all_descs + " " + skill_names_text
 
     sorted_skills = sorted(skills, key=lambda s: clipped_skill_months(s, yoe), reverse=True)
-    nlp_skills = [s for s in sorted_skills if s["name"].lower() in NLP_IR_SKILLS]
-    top_skills = [s["name"] for s in (nlp_skills[:2] if nlp_skills else sorted_skills[:2])]
+    nlp_skills = [s for s in sorted_skills if s.get("name", "").lower() in NLP_IR_SKILLS]
+    top_skills = [s.get("name", "") for s in (nlp_skills[:2] if nlp_skills else sorted_skills[:2])]
     top_skill = top_skills[0] if top_skills else "general ML"
 
     vec_hits = [t for t in VECTOR_DB_TERMS if t in all_descs]
     metric_hits = [t for t in EVAL_METRIC_TERMS if t in all_descs]
     ft_hits = [t for t in FINETUNE_TERMS if t in all_text]
+
+    # attribute vector-DB evidence to the job whose description actually
+    # mentions it — naming the wrong company is a Stage 4 accuracy penalty
+    vec_hit_term = None
+    vec_hit_company = ""
+    vec_hit_current = False
+    for job in sorted(career, key=lambda j: not j.get("is_current")):
+        desc = job.get("description", "").lower()
+        term = next((t for t in VECTOR_DB_TERMS if t in desc), None)
+        if term:
+            vec_hit_term = term
+            vec_hit_company = job.get("company", "")
+            vec_hit_current = bool(job.get("is_current"))
+            break
 
     # concern clause, phrased differently per signal
     location = profile.get("location", "").lower()
@@ -795,7 +814,8 @@ def generate_reasoning(c: Optional[Dict], rank: int, cid: str = "") -> str:
     if rank > 60:
         # hedged tone for the back half of the list
         if vec_hits or metric_hits:
-            body = (f"Adjacent rather than exact fit: mentions {(vec_hits + metric_hits)[0].upper() if (vec_hits + metric_hits)[0] in EVAL_METRIC_TERMS else (vec_hits + metric_hits)[0].title()} "
+            lead_term = pretty_term((vec_hits + metric_hits)[0])
+            body = (f"Adjacent rather than exact fit: mentions {lead_term} "
                     f"in past work but with thinner production-retrieval depth than the top of this list; "
                     f"{yoe} yrs total, {qual} mo in product ML roles.")
         else:
@@ -803,11 +823,19 @@ def generate_reasoning(c: Optional[Dict], rank: int, cid: str = "") -> str:
                     f"embeddings/retrieval depth sits below the top-tier cutoff, "
                     f"though {qual} mo of product-company experience keeps them shortlist-worthy.")
     elif vec_hits:
-        body = (f"Production {vec_hits[0].title()} work described at {current_company} hits the "
+        db_name = pretty_term(vec_hit_term or vec_hits[0])
+        if vec_hit_current and current_company:
+            where = f"at {current_company}"
+        elif vec_hit_company:
+            where = f"in an earlier role at {vec_hit_company}"
+        else:
+            where = "in a previous product role"
+        body = (f"Production {db_name} work described {where} hits the "
                 f"vector-database must-have directly; {yoe} yrs overall with {qual} mo "
                 f"inside product ML teams.")
     elif metric_hits:
-        body = (f"Cites {metric_hits[0].upper()} for ranking quality in shipped work — exactly the "
+        metric_name = pretty_term(metric_hits[0])
+        body = (f"Cites {metric_name} for ranking quality in shipped work — exactly the "
                 f"offline-evaluation rigor this role centers on. Currently {current_title} "
                 f"with {yoe} yrs of experience.")
     elif ft_hits:
@@ -844,7 +872,13 @@ def main(candidates_file: str, output_file: str) -> None:
             line = line.strip()
             if not line:
                 continue
-            c = json.loads(line)
+            # malformed lines in a user-supplied sample must not kill the run
+            try:
+                c = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(c, dict) or not c.get("candidate_id"):
+                continue
             if hard_drop(c, now):
                 if len(dropped_ids) < 200:
                     dropped_ids.append(c.get("candidate_id", ""))
@@ -857,7 +891,8 @@ def main(candidates_file: str, output_file: str) -> None:
         vectorizer = TfidfVectorizer(max_features=8000, stop_words="english", ngram_range=(1, 2))
         tfidf = vectorizer.fit_transform(texts)
         sims = cosine_similarity(tfidf[:-1], tfidf[-1]).ravel()
-        percentiles = sims.argsort().argsort().astype(float) / max(len(sims) - 1, 1)
+        # stable sort so tied similarities rank identically across numpy versions
+        percentiles = sims.argsort(kind="stable").argsort(kind="stable").astype(float) / max(len(sims) - 1, 1)
     else:
         percentiles = np.array([])
 
@@ -907,6 +942,10 @@ def main(candidates_file: str, output_file: str) -> None:
             reasoning = generate_reasoning(cand, i, cid)
             writer.writerow([cid, i, f"{scr:.4f}", reasoning])
 
+    if len(top100) < 100:
+        print(f"WARNING: only {len(top100)} rows written - the submission "
+              f"validator requires exactly 100 (fine for small demo samples).",
+              file=sys.stderr)
     print(f"Done. Survivors: {len(survivors)} | Top 100 written to: {output_file}")
 
 
