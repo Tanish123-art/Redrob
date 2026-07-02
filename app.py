@@ -1,9 +1,11 @@
 import csv
+import glob
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 
 import gradio as gr
 
@@ -32,7 +34,19 @@ def to_jsonl(raw_bytes, is_gz):
     return raw_bytes
 
 
+def cleanup_stale_outputs(max_age_seconds=3600):
+    """Remove old result CSVs so repeated runs don't fill the tempdir."""
+    cutoff = time.time() - max_age_seconds
+    for path in glob.glob(os.path.join(TEMP_DIR, "redrob_ranking_*.csv")):
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.unlink(path)
+        except OSError:
+            pass
+
+
 def run_ranking(upload_file, json_text):
+    cleanup_stale_outputs()
     # determine input source
     if upload_file is not None:
         src = upload_file.name if hasattr(upload_file, "name") else upload_file
@@ -119,7 +133,9 @@ with gr.Blocks(title="Redrob Ranking Engine") as demo:
 
     def run_ranking_ui(upload_file, json_text):
         rows, out_path = run_ranking(upload_file, json_text)
-        return rows, gr.DownloadButton(visible=out_path is not None, value=out_path)
+        if out_path is None:
+            return rows, gr.DownloadButton(visible=False)
+        return rows, gr.DownloadButton(visible=True, value=out_path)
 
     run_btn.click(
         fn=run_ranking_ui,

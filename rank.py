@@ -303,8 +303,11 @@ def hard_drop(c: Dict, now: datetime) -> bool:
         if product_jobs == 0:
             return True
 
-    # 5. Insufficient product-company tech experience (< 48 months)
-    if compute_qualifying_months(c) < 48:
+    # 5. Insufficient product-company tech experience. JD: "we'll seriously
+    # consider candidates outside the band if other signals are strong" —
+    # so only extreme shortfalls (< 24 mo) are dropped; the 24-47 mo band
+    # survives with a heavy Phase 2A penalty instead.
+    if compute_qualifying_months(c) < 24:
         return True
 
     # 6. Non-coding current role >= 18 months (hard drop)
@@ -318,8 +321,10 @@ def hard_drop(c: Dict, now: datetime) -> bool:
                     return True
             break
 
-    # 7. Total experience < 4 years
-    if profile.get("years_of_experience", 0) < 4:
+    # 7. Total experience far below the JD's 5-9 band. < 3 yrs cannot be a
+    # "senior engineer at 4 years" outlier; 3-4 yrs survives with a heavy
+    # Phase 2A penalty so only exceptional signals can carry them into the 100.
+    if profile.get("years_of_experience", 0) < 3:
         return True
 
     return False
@@ -372,6 +377,15 @@ def penalty_multiplier(c: Dict, now: datetime) -> float:
     nlp_ir_months = sum(
         clipped_skill_months(s, yoe) for s in skills if s.get("name", "").lower() in NLP_IR_SKILLS
     )
+
+    # -1. Near-miss experience bands (formerly hard drops). The JD treats
+    # 5-9 yrs as "a range, not a requirement", so below-band candidates
+    # stay in the pool but need exceptional signals to rank.
+    if yoe < 4:
+        mul *= 0.25
+    qual_months = compute_qualifying_months(c)
+    if qual_months < 48:
+        mul *= 0.3
 
     # 0. Duration inflation: skills claiming more months than the whole
     # career + 2yr slack — the JD's "keyword embedding" anti-pattern
