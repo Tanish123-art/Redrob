@@ -52,44 +52,47 @@ def run_ranking(upload_file, json_text):
         raw = text.encode("utf-8")
         suffix = ".jsonl"
     else:
-        return [["error", "", "", "no input provided"]]
+        return [["error", "", "", "no input provided"]], None
 
     # write input to temp file
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
 
-    # run ranker
+    with tempfile.NamedTemporaryFile(prefix="redrob_ranking_", suffix=".csv", delete=False) as out_tmp:
+        out_path = out_tmp.name
+
+    # run ranker (challenge cap is 5 min on CPU; leave a safety margin)
     try:
         proc = subprocess.run(
-            [sys.executable, RANK_SCRIPT, "--candidates", tmp_path, "--out", OUT_PATH],
-            capture_output=True, text=True, timeout=120
+            [sys.executable, RANK_SCRIPT, "--candidates", tmp_path, "--out", out_path],
+            capture_output=True, text=True, timeout=290
         )
         if proc.returncode != 0:
-            return [["error", "", "", proc.stderr or proc.stdout]]
+            return [["error", "", "", proc.stderr or proc.stdout]], None
     except subprocess.TimeoutExpired:
-        return [["error", "", "", "ranking timed out (>120s)"]]
+        return [["error", "", "", "ranking timed out (>290s)"]], None
     except Exception as e:
-        return [["error", "", "", str(e)]]
+        return [["error", "", "", str(e)]], None
     finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
 
-    if not os.path.exists(OUT_PATH):
-        return [["error", "", "", "output file not produced"]]
+    if not os.path.exists(out_path):
+        return [["error", "", "", "output file not produced"]], None
 
     # parse CSV into table rows
     rows = []
-    with open(OUT_PATH, "r", encoding="utf-8") as f:
+    with open(out_path, "r", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             rows.append([row["rank"], row["candidate_id"], row["score"], row["reasoning"]])
 
     if not rows:
-        return [["info", "", "", "no candidates passed the filters"]]
+        return [["info", "", "", "no candidates passed the filters"]], None
 
-    return rows
+    return rows, out_path
 
 
 with gr.Blocks(title="Redrob Ranking Engine") as demo:
@@ -104,6 +107,7 @@ with gr.Blocks(title="Redrob Ranking Engine") as demo:
                 value=load_sample()
             )
             run_btn = gr.Button("Run Ranking")
+            download_btn = gr.DownloadButton("Download results.csv", visible=False)
 
         with gr.Column(scale=2):
             output_table = gr.Dataframe(
@@ -113,11 +117,19 @@ with gr.Blocks(title="Redrob Ranking Engine") as demo:
                 interactive=False
             )
 
+    def run_ranking_ui(upload_file, json_text):
+        rows, out_path = run_ranking(upload_file, json_text)
+        return rows, gr.DownloadButton(visible=out_path is not None, value=out_path)
+
     run_btn.click(
-        fn=run_ranking,
+        fn=run_ranking_ui,
         inputs=[upload, json_input],
-        outputs=[output_table]
+        outputs=[output_table, download_btn]
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
+        ssr_mode=False,
+    )
